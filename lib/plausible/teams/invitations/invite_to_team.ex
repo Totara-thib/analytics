@@ -47,17 +47,16 @@ defmodule Plausible.Teams.Invitations.InviteToTeam do
   @spec invite_all(
           Teams.Team.t(),
           Plausible.Auth.User.t(),
-          [invite_entry()],
-          Keyword.t()
+          [invite_entry()]
         ) ::
           {:ok, [Teams.Invitation.t()]} | {:error, any()}
-  def invite_all(team, inviter, entries, opts \\ []) do
+  def invite_all(team, inviter, entries) do
     with :ok <- validate_emails(Enum.map(entries, & &1.email)) do
       team = Repo.preload(team, [:owners])
 
       Repo.transaction(fn ->
         Enum.map(entries, fn %{email: email, role: role} ->
-          case do_invite(team, inviter, email, role, opts) do
+          case do_invite(team, inviter, email, role) do
             {:ok, invitation} -> invitation
             {:error, reason} -> Repo.rollback(reason)
           end
@@ -93,17 +92,14 @@ defmodule Plausible.Teams.Invitations.InviteToTeam do
     String.contains?(email, "@") and String.contains?(email, ".")
   end
 
-  defp do_invite(team, inviter, invitee_email, role, opts) when role in @valid_roles do
-    with :ok <- Teams.Invitations.check_invitation_permissions(team, inviter, role, opts),
+  defp do_invite(team, inviter, invitee_email, role) do
+    with :ok <-
+           Teams.TeamRolePermissions.ensure_can_grant_for_invitation(team, inviter, nil, role),
          :ok <- Teams.Invitations.check_team_member_limit(team, role, invitee_email),
          invitee = Plausible.Auth.find_user_by(email: invitee_email),
          :ok <- Teams.Invitations.ensure_new_membership(team, invitee, role),
          :ok <- Teams.Invitations.ensure_not_already_invited(team, invitee_email) do
       Teams.Invitations.invite(team, invitee_email, role, inviter)
     end
-  end
-
-  defp do_invite(_team, _inviter, _invitee_email, role, _opts) do
-    raise "Invalid role passed: #{inspect(role)}"
   end
 end
